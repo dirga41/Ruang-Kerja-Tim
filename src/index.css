@@ -1,0 +1,58 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+html, body, #root { height: 100%; }
+body {
+  @apply bg-cream-100 font-sans text-ink antialiased;
+  margin: 0;
+}
+
+@layer components {
+  .card {
+    @apply rounded-2xl border border-white/70 bg-white/85 shadow-soft backdrop-blur-md;
+  }
+  .btn-primary {
+    @apply inline-flex items-center justify-center gap-1.5 rounded-xl px-3 py-1.5 text-xs font-semibold transition focus:outline-none focus-visible:ring-2 focus-visible:ring-amber-500 focus-visible:ring-offset-1 disabled:cursor-not-allowed disabled:opacity-50 bg-ink text-white hover:bg-black;
+  }
+  .btn-ghost {
+    @apply inline-flex items-center justify-center gap-1.5 rounded-xl px-3 py-1.5 text-xs font-semibold transition focus:outline-none focus-visible:ring-2 focus-visible:ring-amber-500 focus-visible:ring-offset-1 disabled:cursor-not-allowed disabled:opacity-50 border border-stone-200 bg-white text-ink hover:bg-stone-50;
+  }
+  .pill { @apply inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[11px] font-semibold leading-4; }
+  .label { @apply text-[11px] font-semibold uppercase tracking-wide text-ink-mute; }
+}
+
+/* scrollbar tipis */
+.thin-scroll { scrollbar-width: thin; scrollbar-color: #d6cbb8 transparent; }
+.thin-scroll::-webkit-scrollbar { width: 6px; height: 6px; }
+.thin-scroll::-webkit-scrollbar-thumb { background: #d6cbb8; border-radius: 999px; }
+
+@keyframes feed-in { from { opacity: 0; transform: translateY(-6px); } to { opacity: 1; transform: none; } }
+.feed-in { animation: feed-in 0.25s ease-out; }
+@keyframes pulse-dot { 0%, 100% { opacity: 1; } 50% { opacity: 0.35; } }
+.pulse-dot { animation: pulse-dot 1.4s ease-in-out infinite; }
+@keyframes bubble-in { from { opacity: 0; transform: translateY(4px) scale(0.96); } to { opacity: 1; transform: none; } }
+.bubble-in { animation: bubble-in 0.2s ease-out; }
+
+@media (prefers-reduced-motion: reduce) {
+  .feed-in, .pulse-dot, .bubble-in { animation: none; }
+}
+
+/* dokumen markdown di pratinjau */
+.doc { @apply text-[13px] leading-relaxed text-ink; }
+.doc h1 { @apply mb-3 mt-1 text-xl font-extrabold; }
+.doc h2 { @apply mb-2 mt-5 border-b border-stone-200 pb-1 text-base font-bold; }
+.doc h3 { @apply mb-1.5 mt-4 text-sm font-bold; }
+.doc p { @apply my-2; }
+.doc ul { @apply my-2 list-disc pl-5; }
+.doc ol { @apply my-2 list-decimal pl-5; }
+.doc li { @apply my-0.5; }
+.doc blockquote { @apply my-3 border-l-4 border-amber-300 bg-amber-50 px-3 py-2 italic; }
+.doc code { @apply rounded bg-stone-100 px-1 py-0.5 font-mono text-[12px]; }
+.doc pre { @apply my-3 overflow-x-auto rounded-xl bg-stone-900 p-3 text-[11.5px] leading-snug text-stone-100; }
+.doc pre code { @apply bg-transparent p-0 text-inherit; }
+.doc table { @apply my-3 w-full border-collapse text-[12px]; }
+.doc th { @apply border border-stone-200 bg-stone-50 px-2 py-1.5 text-left font-semibold; }
+.doc td { @apply border border-stone-200 px-2 py-1.5 align-top; }
+.doc .table-wrap { @apply overflow-x-auto; }
+.mermaid-box svg { max-width: 100%; height: auto; }
