@@ -10,8 +10,16 @@
 interface AnyMsg { role: 'user' | 'assistant'; content: any }
 interface AnyTool { name: string; description: string; input_schema: Record<string, any> }
 
-export function toOpenAIRequest(opts: { model: string; maxTokens: number; system: string; tools: AnyTool[]; messages: AnyMsg[] }) {
-  const out: any[] = [{ role: 'system', content: opts.system }];
+export interface OpenAIRequestOptions {
+  model: string; maxTokens: number; system: string; tools: AnyTool[]; messages: AnyMsg[];
+  /** false = jangan kirim stream_options (sebagian penyedia menolaknya) */
+  includeUsage?: boolean;
+  /** true = instruksi sistem digabung ke pesan user pertama (untuk model tanpa peran `system`, mis. Gemma) */
+  systemAsUser?: boolean;
+}
+
+export function toOpenAIRequest(opts: OpenAIRequestOptions) {
+  const out: any[] = opts.systemAsUser ? [] : [{ role: 'system', content: opts.system }];
   for (const m of opts.messages) {
     if (typeof m.content === 'string') {
       out.push({ role: m.role, content: m.content });
@@ -38,14 +46,20 @@ export function toOpenAIRequest(opts: { model: string; maxTokens: number; system
       if (text) out.push({ role: 'user', content: text });
     }
   }
-  return {
+  if (opts.systemAsUser) {
+    const first = out.find((m) => m.role === 'user');
+    if (first) first.content = `[Instruksi sistem]\n${opts.system}\n\n[Pesan]\n${first.content}`;
+    else out.unshift({ role: 'user', content: opts.system });
+  }
+  const body: Record<string, unknown> = {
     model: opts.model,
     max_tokens: opts.maxTokens,
     messages: out,
     tools: opts.tools.map((t) => ({ type: 'function', function: { name: t.name, description: t.description, parameters: t.input_schema } })),
     stream: true,
-    stream_options: { include_usage: true },
   };
+  if (opts.includeUsage !== false) body.stream_options = { include_usage: true };
+  return body;
 }
 
 /** Ubah stream SSE OpenAI menjadi stream SSE bergaya Anthropic. */

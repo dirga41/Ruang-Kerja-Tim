@@ -1,15 +1,26 @@
 import { defineConfig, loadEnv, type Plugin } from 'vite';
 import react from '@vitejs/plugin-react';
+import { WebSocketServer } from 'ws';
+import { attachRealtime } from './server/realtime';
 
 /**
  * Menjalankan fungsi di folder /api saat `npm run dev`, supaya perilaku lokal
- * sama dengan di Vercel tanpa perlu `vercel dev`. Fungsi-fungsi itu memakai
+ * sama dengan di Vercel tanpa perlu `vercel dev`. Plugin ini juga memasang
+ * server real-time (WebSocket) dari server/realtime.ts. Fungsi-fungsi itu memakai
  * antarmuka web standar (Request → Response).
  */
 function devApi(): Plugin {
   return {
     name: 'dev-api',
     configureServer(server) {
+      // WebSocket /ws menumpang di server dev yang sama (port 5173), jadi tidak perlu proses kedua.
+      if (server.httpServer) {
+        const rt = attachRealtime(server.httpServer as import('node:http').Server, {
+          WebSocketServer,
+          log: (m) => server.config.logger.info(`  [realtime] ${m}`),
+        });
+        server.httpServer.once('close', () => rt.close());
+      }
       server.middlewares.use(async (req, res, next) => {
         const path = (req.url ?? '').split('?')[0];
         const name = path.startsWith('/api/') ? path.slice(5) : '';

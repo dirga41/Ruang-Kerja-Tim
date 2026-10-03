@@ -59,6 +59,40 @@ npm run dev
 
 Buka http://localhost:5173. Di Mac, cukup klik ganda `Jalankan.command`. Fungsi `api/` ikut berjalan saat `npm run dev`, jadi mode live bisa dicoba lokal dengan mengisi `.env`.
 
+## Real-time lewat WebSocket
+
+Proyek ini punya dua jalur dengan event yang sama persis. Aplikasi memilihnya otomatis saat dimuat:
+
+| Jalur | Kapan dipakai | Orkestrasi berjalan di | Lencana header |
+|---|---|---|---|
+| **WebSocket** | Server real-time tersedia (`npm run dev`, `npm start`, atau `VITE_WS_URL`) | Server; event dikirim ke semua browser yang tersambung | `WebSocket · N tersambung` |
+| **Lokal** | Tidak ada server real-time (mis. deploy Vercel saja) | Browser itu sendiri | `Lokal` |
+
+Dengan WebSocket: log aktivitas, status agent, dan statistik header mengalir dari server; beberapa browser bisa menonton sesi yang sama; sesi tetap berjalan walau tab ditutup; koneksi yang putus disambung ulang otomatis dan langsung menerima snapshot terbaru.
+
+Protokol di `ws://<host>/ws` (JSON):
+
+- Server → klien: `hello`, `viewers`, `snapshot`, `agent_status_changed`, `activity_logged`, `task_assigned`, `artifact_created`, `decision_logged`, `roadmap_progress_updated`, `stats_updated`, `validation_updated`, `whiteboard_updated`, `session_ended`, serta `ack` / `error` sebagai jawaban perintah.
+- Klien → server: `{ "type": "start", "brief": "…", "password": "…" }`, `{ "type": "message", "text": "…" }`, `{ "type": "stop" }`.
+
+Menjalankan:
+
+```bash
+npm run dev                 # pengembangan: WebSocket menumpang di port 5173
+npm run build && npm start  # produksi mandiri: situs + /api + /ws di port 8787
+```
+
+**Vercel tidak bisa menjadi server WebSocket.** Di Vercel aplikasi tetap berjalan di jalur Lokal. Untuk WebSocket di produksi, jalankan `npm start` di host yang mendukung proses berumur panjang (VPS, Railway, Render, Fly.io). Frontend boleh tetap di Vercel: isi `VITE_WS_URL=wss://alamat-server-anda/ws` di Environment Variables Vercel lalu deploy ulang, dan isi API key di server WebSocket tersebut.
+
+### Frontend di Vercel + server WebSocket di Render
+
+1. Unggah repository yang sama ke Render sebagai **Web Service** (atau pakai `render.yaml`): Build `npm install`, Start `npm start`, plan Free.
+2. Di Render, isi Environment: API key penyedia model, `APP_PASSWORD`, dan `WS_ALLOWED_ORIGINS=https://<aplikasi-anda>.vercel.app`.
+3. Di Vercel, isi `VITE_WS_URL=wss://<nama-layanan>.onrender.com/ws`, lalu **deploy ulang** (variabel `VITE_` dibaca saat build).
+4. Buka aplikasi di Vercel. Lencana header berubah menjadi `WebSocket · 1 tersambung`.
+
+Layanan gratis Render tidur saat tidak dipakai. Saat halaman dibuka, aplikasi menampilkan "Membangunkan server…" dan menunggu sampai 90 detik sebelum beralih ke jalur Lokal.
+
 ## Cara kerjanya
 
 ```
@@ -73,7 +107,7 @@ Browser                                   Vercel
 ```
 
 - **Orkestrasi berjalan di browser.** Setiap giliran model adalah satu panggilan ke `/api/claude`. Fungsi itu menambahkan system prompt dan daftar tool milik agent yang diminta, lalu meneruskan respons streaming dari Anthropic. Klien hanya mengirim nama agent dan riwayat pesan, sehingga endpoint ini tidak bisa dipakai sebagai proxy Claude serbaguna.
-- **Event real-time** (`agent_status_changed`, `activity_logged`, `task_assigned`, `artifact_created`, `decision_logged`, `roadmap_progress_updated`, `stats_updated`, dan lainnya) tetap sama, tetapi dipancarkan langsung di dalam browser, bukan lewat WebSocket. Fungsi serverless Vercel tidak bisa menahan koneksi WebSocket.
+- **Di jalur Lokal**, event yang sama dipancarkan langsung di dalam browser, karena fungsi serverless Vercel tidak bisa menahan koneksi WebSocket. Butir-butir di bawah ini menjelaskan jalur Lokal.
 - **Penyimpanan** memakai `localStorage` browser: sesi terakhir tampil lagi setelah halaman dimuat ulang (tidak bisa dilanjutkan), dan riwayat tidak dibagi antar perangkat.
 - **Tab harus tetap terbuka** selama sesi berjalan. Menutup atau memuat ulang tab menghentikan sesi.
 
@@ -102,12 +136,16 @@ Status agent: **Sedang bekerja**, **Istirahat** (otomatis saat tidak ada tugas),
 ## Struktur proyek
 
 ```
+server/
+  realtime.ts          Server WebSocket: menjalankan sesi dan menyiarkan event
+  index.ts             Server produksi mandiri (situs + /api + /ws)
 api/
   claude.ts            Fungsi Edge: proxy satu giliran model ke Anthropic (streaming)
   health.ts            Fungsi Edge: memberi tahu klien mode demo/live
 src/
   App.tsx              Tata letak penuh dan mode ringkas
-  store.ts             State Zustand + runtime sesi (mulai, sela, hentikan)
+  store.ts             State Zustand + runtime sesi (jalur WebSocket dan lokal)
+  realtime.ts          Klien WebSocket (sambung ulang otomatis, ack/error)
   shared/types.ts      Tipe event, state, dan definisi agent
   engine/
     session.ts         State sesi; setiap perubahan dipancarkan sebagai event

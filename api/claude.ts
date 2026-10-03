@@ -43,17 +43,32 @@ export default async function handler(req: Request): Promise<Response> {
   const messages = body.messages as any[];
   let upstream: Response;
   try {
-    upstream = provider.kind === 'openai'
-      ? await fetch(`${provider.baseUrl}/chat/completions`, {
+    if (provider.kind === 'openai') {
+      // Penyedia "kompatibel OpenAI" berbeda-beda dalam hal yang mereka terima. Bila permintaan
+      // ditolak (400/422/500), coba lagi dengan bentuk yang makin sederhana sebelum menyerah.
+      const maxTokens = Math.max(256, Math.min(MAX_TOKENS, Number(process.env.OPENAI_MAX_TOKENS) || MAX_TOKENS));
+      const base = { model: provider.model, system: SYSTEM[agent], tools: toolsFor(agent), messages };
+      const variants = [
+        { maxTokens, includeUsage: true, systemAsUser: false },
+        { maxTokens: Math.min(maxTokens, 8192), includeUsage: false, systemAsUser: false },
+        { maxTokens: Math.min(maxTokens, 8192), includeUsage: false, systemAsUser: true },
+      ];
+      upstream = new Response(null, { status: 502 });
+      for (const v of variants) {
+        upstream = await fetch(`${provider.baseUrl}/chat/completions`, {
           method: 'POST',
           headers: { 'content-type': 'application/json', authorization: `Bearer ${provider.key}` },
-          body: JSON.stringify(toOpenAIRequest({ model: provider.model, maxTokens: MAX_TOKENS, system: SYSTEM[agent], tools: toolsFor(agent), messages })),
-        })
-      : await fetch(`${provider.baseUrl}/v1/messages`, {
-          method: 'POST',
-          headers: { 'content-type': 'application/json', 'x-api-key': provider.key, 'anthropic-version': '2023-06-01' },
-          body: JSON.stringify({ model: provider.model, max_tokens: MAX_TOKENS, system: SYSTEM[agent], tools: toolsFor(agent), messages, stream: true }),
+          body: JSON.stringify(toOpenAIRequest({ ...base, ...v })),
         });
+        if (upstream.ok || ![400, 422, 500].includes(upstream.status)) break;
+      }
+    } else {
+      upstream = await fetch(`${provider.baseUrl}/v1/messages`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json', 'x-api-key': provider.key, 'anthropic-version': '2023-06-01' },
+        body: JSON.stringify({ model: provider.model, max_tokens: MAX_TOKENS, system: SYSTEM[agent], tools: toolsFor(agent), messages, stream: true }),
+      });
+    }
   } catch (err) {
     return json(502, { error: `Tidak bisa menghubungi penyedia model (${provider.baseUrl}): ${String((err as Error)?.message ?? err)}` });
   }
@@ -63,11 +78,15 @@ export default async function handler(req: Request): Promise<Response> {
     let message = text.slice(0, 500);
     try {
       const parsed = JSON.parse(text);
-      message = parsed.error?.message ?? (typeof parsed.error === 'string' ? parsed.error : parsed.message) ?? message;
+      const first = Array.isArray(parsed) ? parsed[0] : parsed; // Gemini membungkus galat dalam array
+      message = first?.error?.message ?? (typeof first?.error === 'string' ? first.error : first?.message) ?? message;
     } catch {
       /* biarkan teks apa adanya */
     }
-    return json(upstream.status || 502, { error: `Penyedia model (${provider.model}): ${message || 'permintaan gagal'}` });
+    const hint = provider.kind === 'openai' && [400, 422, 500].includes(upstream.status)
+      ? ' Model ini kemungkinan tidak mendukung tool/function calling lewat endpoint ini; coba model lain di OPENAI_MODEL.'
+      : '';
+    return json(upstream.status || 502, { error: `Penyedia model (${provider.model}): ${message || 'permintaan gagal'}.${hint}` });
   }
   return new Response(provider.kind === 'openai' ? openAIStreamToAnthropic(upstream.body) : upstream.body, {
     status: 200,

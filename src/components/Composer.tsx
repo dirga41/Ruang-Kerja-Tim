@@ -12,6 +12,7 @@ export function StartCard() {
   const mode = useStore((s) => s.mode);
   const connected = useStore((s) => s.connected);
   const locked = useStore((s) => s.locked);
+  const waking = useStore((s) => s.waking);
   const [sandi, setSandi] = useState('');
 
   const submit = async (e: FormEvent) => {
@@ -61,7 +62,7 @@ export function StartCard() {
       <div className="mt-4 flex items-center justify-between gap-3">
         <p className="text-[11px] text-ink-mute">
           {!connected
-            ? 'Menyiapkan…'
+            ? (waking ? 'Membangunkan server real-time. Di hosting gratis ini bisa sampai satu menit…' : 'Menyiapkan…')
             : mode === 'demo'
               ? 'Mode demo: memakai data simulasi karena API key belum diisi.'
               : 'Mode live: terhubung ke API model.'}

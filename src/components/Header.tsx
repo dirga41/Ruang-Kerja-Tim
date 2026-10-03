@@ -53,18 +53,27 @@ export function TitleCard() {
 export function LiveCard() {
   const session = useStore((s) => s.session);
   const connected = useStore((s) => s.connected);
+  const transport = useStore((s) => s.transport);
+  const viewers = useStore((s) => s.viewers);
+  const waking = useStore((s) => s.waking);
   const running = !!session?.running;
   const now = useNow(running);
   const elapsed = session ? (session.finishedAt ?? now) - session.startedAt : 0;
   const progress = session?.progress ?? 0;
-  const state = !connected ? 'Menyiapkan' : running ? 'Live' : session ? 'Selesai' : 'Siap';
-  const dot = !connected ? 'bg-stone-400' : running ? 'bg-emerald-500 pulse-dot' : 'bg-stone-400';
+  const state = !connected ? (transport === 'ws' ? 'Terputus' : waking ? 'Membangunkan server…' : 'Menyiapkan') : running ? 'Live' : session ? 'Selesai' : 'Siap';
+  const dot = !connected ? (transport === 'ws' ? 'bg-rose-500' : 'bg-stone-400') : running ? 'bg-emerald-500 pulse-dot' : 'bg-stone-400';
   return (
     <div className="card min-w-[220px] px-4 py-3">
       <div className="flex items-center justify-between gap-3">
         <span className="flex items-center gap-1.5 text-sm font-bold">
           <span aria-hidden className={`inline-block h-2.5 w-2.5 rounded-full ${dot}`} />
           {state}
+        </span>
+        <span
+          className={`pill ${transport === 'ws' ? 'bg-sky-100 text-sky-800' : 'bg-stone-100 text-stone-600'}`}
+          title={transport === 'ws' ? 'Event dikirim dari server lewat WebSocket' : 'Tanpa server real-time: orkestrasi berjalan di browser ini'}
+        >
+          {transport === 'ws' ? `WebSocket · ${viewers} tersambung` : 'Lokal'}
         </span>
         <span className="font-mono text-sm tabular-nums text-ink-soft" aria-label="Durasi sesi">{fmtDuration(elapsed)}</span>
       </div>

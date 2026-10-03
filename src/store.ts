@@ -5,6 +5,7 @@ import { DemoEngine } from './engine/demo';
 import { LiveEngine } from './engine/live';
 import { createClaudeCaller } from './engine/claudeClient';
 import { browserStore, loadLastSession } from './engine/storage';
+import { hasRemoteRealtime, openRealtime, type Realtime } from './realtime';
 
 export type TabId = 'roadmap' | 'keputusan' | 'output' | 'validasi';
 export type CameraPreset = 'isometrik' | 'depan' | 'papan' | 'atas';
@@ -19,6 +20,12 @@ interface Store {
   locked: boolean;
   /** nama model yang dipakai di mode live */
   model: string | null;
+  /** 'ws' = event datang dari server lewat WebSocket; 'lokal' = orkestrasi berjalan di browser ini */
+  transport: 'ws' | 'lokal';
+  /** jumlah browser yang tersambung ke server real-time */
+  viewers: number;
+  /** sedang menunggu server real-time terpisah bangun dari tidur */
+  waking: boolean;
   session: SessionState | null;
   // UI
   filter: AgentId | 'semua';
@@ -53,6 +60,9 @@ export const useStore = create<Store>((set) => ({
   mode: 'demo',
   locked: false,
   model: null,
+  transport: 'lokal',
+  viewers: 0,
+  waking: false,
   session: null,
   filter: 'semua',
   feedCollapsed: false,
@@ -119,9 +129,11 @@ export const useStore = create<Store>((set) => ({
     }),
 }));
 
-// ---------- runtime: orkestrator berjalan di browser ----------
-// Event yang dulu dikirim lewat WebSocket kini dipancarkan langsung oleh Session
-// ke store ini (nama dan bentuk event tetap sama).
+// ---------- runtime ----------
+// Dua jalur dengan event yang sama persis:
+//   1. WebSocket  — orkestrasi berjalan di server real-time; event dikirim ke semua browser.
+//   2. Lokal      — tanpa server real-time (mis. di Vercel), orkestrasi berjalan di browser ini.
+let realtime: Realtime | null = null;
 let current: Session | null = null;
 let password = '';
 try {
@@ -136,8 +148,8 @@ const demoSpeed = Math.max(0.25, Number(import.meta.env.VITE_DEMO_SPEED ?? 1) ||
 
 /**
  * Session mengubah state-nya di tempat. Event disalin dulu supaya store React
- * tidak berbagi referensi dengan state milik Session (dulu batas ini dijaga
- * oleh serialisasi WebSocket).
+ * tidak berbagi referensi dengan state milik Session (di jalur WebSocket batas
+ * ini sudah dijaga oleh serialisasi JSON).
  */
 const emit = (ev: ServerEvent) => useStore.getState().apply(JSON.parse(JSON.stringify(ev)) as ServerEvent);
 
@@ -156,9 +168,40 @@ function drive(session: Session, job: Promise<void>) {
   });
 }
 
-/** Dipanggil sekali saat aplikasi dimuat: cek mode di server dan pulihkan sesi terakhir. */
-export async function connect() {
+/** Dipanggil sekali saat aplikasi dimuat: sambungkan WebSocket; bila tidak ada, pakai mode lokal. */
+let connecting: Promise<void> | null = null;
+/** Aman dipanggil berkali-kali (React StrictMode menjalankan efek dua kali): hanya satu koneksi yang dibuat. */
+export function connect(): Promise<void> {
+  connecting ??= connectOnce();
+  return connecting;
+}
+
+async function connectOnce() {
   const st = useStore.getState();
+
+  useStore.setState({ waking: hasRemoteRealtime() });
+  // 1) Coba server real-time. `hello` membawa mode/model, `snapshot` membawa state sesi.
+  realtime = await openRealtime({
+    onEvent: (ev) => {
+      if (ev.type === 'hello') {
+        useStore.setState({ mode: ev.payload.mode, model: ev.payload.model, locked: !!ev.payload.locked, viewers: ev.payload.viewers ?? 0 });
+      } else if (ev.type === 'viewers') {
+        useStore.setState({ viewers: Number(ev.payload) || 0 });
+      } else if (ev.type === 'error') {
+        console.warn('[realtime]', ev.payload?.message);
+      } else {
+        useStore.getState().apply(ev as ServerEvent);
+      }
+    },
+    onStatus: (connected) => useStore.getState().setConnected(connected),
+  });
+  useStore.setState({ waking: false });
+  if (realtime) {
+    useStore.setState({ transport: 'ws' });
+    return;
+  }
+
+  // 2) Mode lokal: cek mode di /api/health dan pulihkan sesi terakhir dari penyimpanan browser.
   let mode: 'demo' | 'live' = 'demo';
   let locked = false;
   let model: string | null = null;
@@ -173,7 +216,7 @@ export async function connect() {
   } catch {
     /* tanpa fungsi /api (mis. hosting statis murni) aplikasi berjalan dalam mode demo */
   }
-  useStore.setState({ locked, model });
+  useStore.setState({ locked, model, transport: 'lokal' });
   if (!current) st.apply({ type: 'snapshot', payload: { session: loadLastSession(), mode } });
   else useStore.setState({ mode });
   st.setConnected(true);
@@ -181,6 +224,7 @@ export async function connect() {
 
 export const api = {
   async start(brief: string) {
+    if (realtime) return realtime.request({ type: 'start', brief, password });
     current?.abort();
     const mode = useStore.getState().mode;
     const session = new Session(brief, mode, browserStore, emit, mode === 'demo' ? demoSpeed : 1);
@@ -190,6 +234,7 @@ export const api = {
     drive(session, engineFor(mode).run(session));
   },
   async message(text: string) {
+    if (realtime) return realtime.request({ type: 'message', text });
     const session = current;
     if (!session) throw new Error('Sesi ini sudah berakhir. Mulai sesi baru untuk mengirim pesan.');
     session.log('pengguna', 'pengguna', text);
@@ -200,6 +245,7 @@ export const api = {
     }
   },
   async stop() {
+    if (realtime) return realtime.request({ type: 'stop' });
     const session = current;
     if (!session?.state.running) return;
     session.abort();

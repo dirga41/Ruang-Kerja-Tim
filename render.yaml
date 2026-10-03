@@ -1,0 +1,24 @@
+# Blueprint Render: server real-time (WebSocket) untuk Ruang Kerja Tim.
+# Frontend tetap di Vercel; layanan ini hanya menjalankan sesi dan /ws.
+services:
+  - type: web
+    name: ruang-kerja-tim-ws
+    runtime: node
+    plan: free
+    buildCommand: npm install
+    startCommand: npm start
+    healthCheckPath: /api/health
+    envVars:
+      - key: NODE_VERSION
+        value: "22"
+      # Isi di dashboard Render (nilai tidak disimpan di repository):
+      - key: WS_ALLOWED_ORIGINS   # mis. https://aplikasi-anda.vercel.app
+        sync: false
+      - key: APP_PASSWORD
+        sync: false
+      - key: OPENAI_API_KEY
+        sync: false
+      - key: OPENAI_BASE_URL
+        sync: false
+      - key: OPENAI_MODEL
+        sync: false
